@@ -17,6 +17,7 @@
 //   GET    /api/orders            list orders                                (admin)
 //   PUT    /api/orders/:id        update an order's status                    (admin)
 //   POST   /api/admin/verify      check whether an admin key is correct       (public)
+//   GET    /api/admin/telegram-chat-id   find your chat id after messaging the bot  (admin)
 //   POST   /api/nova-poshta/cities       search cities by name                (public, proxies Nova Poshta)
 //   POST   /api/nova-poshta/warehouses   list branches for a city              (public, proxies Nova Poshta)
 
@@ -40,6 +41,12 @@ const ADMIN_KEY = process.env.ADMIN_KEY || "change-me-please";
 // instead of crashing, so the rest of the site keeps working.
 const NOVA_POSHTA_KEY = process.env.NOVA_POSHTA_KEY || "";
 const NOVA_POSHTA_URL = "https://api.novaposhta.ua/v2.0/json/";
+// Telegram order notifications — see README for the two-minute setup
+// (create a bot with @BotFather, message it once, then use
+// GET /api/admin/telegram-chat-id to find your chat id). Until both are
+// set, orders just save normally with no notification — nothing breaks.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 
 const app = express();
 
@@ -48,6 +55,24 @@ app.use(express.json({ limit: "5mb" })); // generous limit: product photos are s
 app.use(morgan("dev"));
 
 const db = await getDb();
+
+// Fire-and-forget — never awaited by the order route, so a slow or failing
+// Telegram call never delays the customer's checkout or breaks the order.
+async function notifyTelegram(order) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  const itemsText = order.items.map((i) => `• ${i.qty} × ${i.name} (${i.volume}) — ${i.price} ₴`).join("\n");
+  const c = order.customer;
+  const customerText = c
+    ? `${c.name || "—"}\n${c.phone || "—"}${c.city ? `\n${c.city}${c.warehouse ? " — " + c.warehouse : ""}` : ""}`
+    : "Без даних клієнта";
+  const text = `🛍 Нове замовлення на ${order.total} ₴\n\n${itemsText}\n\n👤 ${customerText}`;
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
+    });
+  } catch (e) { console.error("Telegram notify failed:", e.message); }
+}
 
 function requireAdmin(req, res, next) {
   const key = req.header("x-admin-key");
@@ -59,6 +84,20 @@ app.post("/api/admin/verify", (req, res) => {
   const { key } = req.body;
   if (key === ADMIN_KEY) return res.json({ ok: true });
   res.status(401).json({ ok: false });
+});
+
+// After creating a bot with @BotFather and messaging it once, call this
+// (with your admin key) to find the chat id to put in TELEGRAM_CHAT_ID —
+// saves you from reading raw Telegram API JSON by hand.
+app.get("/api/admin/telegram-chat-id", requireAdmin, async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ error: "TELEGRAM_BOT_TOKEN is not set yet" });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`);
+    const data = await r.json();
+    const last = data.result?.[data.result.length - 1];
+    const chatId = last?.message?.chat?.id ?? null;
+    res.json({ chatId, messagesSeen: data.result?.length || 0 });
+  } catch (e) { res.status(502).json({ error: "Could not reach Telegram" }); }
 });
 
 // ---------------------------------------------------------------------------
@@ -232,6 +271,7 @@ app.post("/api/orders", async (req, res) => {
   };
   db.data.orders.unshift(order);
   await db.write();
+  notifyTelegram(order); // fire-and-forget — see the function above
 
   // --- where real integrations go -----------------------------------------
   // Payment (e.g. LiqPay/Fondy for UAH, or Stripe):
