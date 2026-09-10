@@ -38,7 +38,7 @@ app.get("/api/products", (req, res) => {
 });
 
 app.post("/api/products", async (req, res) => {
-  const { name, brand, category, family, type, notes, desc, topNotes, middleNotes, baseNotes, badge, image, variants } = req.body;
+  const { name, brand, category, family, type, notes, desc, topNotes, middleNotes, baseNotes, badge, image, imageZoom, imagePosX, imagePosY, variants } = req.body;
   if (!name || !Array.isArray(variants) || variants.length === 0) {
     return res.status(400).json({ error: "name and at least one variant are required" });
   }
@@ -60,6 +60,9 @@ app.post("/api/products", async (req, res) => {
     baseNotes: baseNotes || "",
     badge: badge || null,
     image: image || null,
+    imageZoom: imageZoom ?? 100,
+    imagePosX: imagePosX ?? 50,
+    imagePosY: imagePosY ?? 50,
     variants: variants.map((v) => ({ id: v.id || nanoid(), volume: v.volume, price: Number(v.price), salePrice: v.salePrice ? Number(v.salePrice) : null })),
   };
   db.data.products.unshift(product);
