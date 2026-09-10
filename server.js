@@ -372,21 +372,32 @@ app.post("/api/nova-poshta/warehouses", async (req, res) => {
   try {
     // Nova Poshta caps how many warehouses it returns per request (observed:
     // it silently returns ~300 regardless of the Limit we ask for) — so for
-    // a big city we have to page through results with the Page parameter
-    // until a page comes back with fewer than PAGE_SIZE entries.
+    // a big city we page through results with the Page parameter. Kept to a
+    // handful of pages (not more) so a big city can't make this hang.
     const PAGE_SIZE = 300;
+    const MAX_PAGES = 12; // 12 × 300 = 3600 — Kyiv alone has ~2400 branches+postomats combined
     let page = 1;
     let all = [];
-    while (page <= 15) { // hard stop — 15 × 300 = 4500, comfortably above any real city
-      const npRes = await fetch(NOVA_POSHTA_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses",
-          methodProperties: { CityRef: cityRef, Limit: String(PAGE_SIZE), Page: String(page) },
-        }),
-      });
-      const data = await npRes.json();
-      if (!data.success) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
+    while (page <= MAX_PAGES) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      let data;
+      try {
+        const npRes = await fetch(NOVA_POSHTA_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+          body: JSON.stringify({
+            apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses",
+            methodProperties: { CityRef: cityRef, Limit: String(PAGE_SIZE), Page: String(page) },
+          }),
+        });
+        data = await npRes.json();
+      } finally { clearTimeout(timeout); }
+      if (!data.success) {
+        // If paging itself isn't accepted, fall back to whatever page 1 gave
+        // us rather than failing the whole request.
+        if (page === 1) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
+        break;
+      }
       all = all.concat(data.data);
       if (data.data.length < PAGE_SIZE) break; // last page
       page++;
