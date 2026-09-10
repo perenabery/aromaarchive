@@ -15,6 +15,7 @@
 //   DELETE /api/brands/:id        delete a brand                            (admin)
 //   POST   /api/orders            place an order                            (public — customers checking out)
 //   GET    /api/orders            list orders                                (admin)
+//   PUT    /api/orders/:id        update an order's status                    (admin)
 //   POST   /api/admin/verify      check whether an admin key is correct       (public)
 //   POST   /api/nova-poshta/cities       search cities by name                (public, proxies Nova Poshta)
 //   POST   /api/nova-poshta/warehouses   list branches for a city              (public, proxies Nova Poshta)
@@ -247,6 +248,15 @@ app.get("/api/orders", requireAdmin, (req, res) => {
   res.json(db.data.orders);
 });
 
+app.put("/api/orders/:id", requireAdmin, async (req, res) => {
+  const { status } = req.body;
+  const idx = db.data.orders.findIndex((o) => o.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "not found" });
+  db.data.orders[idx].status = status;
+  await db.write();
+  res.json(db.data.orders[idx]);
+});
+
 // ---------------------------------------------------------------------------
 // Nova Poshta — city + branch lookup for the checkout form. This is a thin
 // proxy: the frontend never sees NOVA_POSHTA_KEY, it just calls these two
@@ -288,7 +298,13 @@ app.post("/api/nova-poshta/warehouses", async (req, res) => {
     });
     const data = await npRes.json();
     if (!data.success) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
-    res.json(data.data.map((w) => ({ ref: w.Ref, description: w.Description, number: w.Number })));
+    res.json(data.data.map((w) => ({
+      ref: w.Ref, description: w.Description, number: w.Number,
+      // Nova Poshta's API marks each point with CategoryOfWarehouse ("Postomat"
+      // vs everything else = a staffed branch). Older/edge responses sometimes
+      // omit that field, so we fall back to checking the description text.
+      category: w.CategoryOfWarehouse === "Postomat" || /поштомат/i.test(w.Description || "") ? "postomat" : "branch",
+    })));
   } catch (e) {
     res.status(502).json({ error: "Could not reach Nova Poshta" });
   }
