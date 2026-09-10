@@ -81,13 +81,25 @@ credentials I can't create for you:
   if you need international cards). You'd register a merchant account, get
   API keys, and create a checkout session inside `POST /api/orders` — the
   code has a comment marking exactly where that goes.
-- **Delivery / Nova Poshta.** Their API needs its own API key from a business
-  account; you'd use it to look up branches and calculate shipping cost once
-  you have the customer's address.
 - **A production database.** `db.json` is fine for a prototype but isn't safe
   for concurrent writes at real traffic. Swap `db.js` for a Postgres/MySQL
   client (e.g. Prisma) when you're ready — the route handlers above it
   wouldn't need to change much.
+
+## Nova Poshta delivery (already wired up, just needs your key)
+
+Unlike payment, this *is* connected end-to-end — the checkout form searches
+cities and lists branches for real. You just need to supply your own key:
+
+1. Go to **new.novaposhta.ua** → sign in (or create an account — just needs
+   a phone number, no business verification).
+2. Open **Особистий кабінет → Налаштування → API ключі** and generate a key.
+3. On Render: your service → **Environment** → add a variable named
+   `NOVA_POSHTA_KEY` with that value → save (Render redeploys automatically).
+
+Until that variable is set, `/api/nova-poshta/cities` and `/api/nova-poshta/warehouses`
+return a clear "not configured yet" error instead of crashing, so the rest of
+checkout still works — the city/branch fields just won't return results.
 - **Auth on the admin routes.** Right now anyone with the URL can POST/PUT/
   DELETE products or brands. Add an auth check (a simple shared admin token
   is enough to start) before deploying this anywhere public.
