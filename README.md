@@ -100,6 +100,26 @@ cities and lists branches for real. You just need to supply your own key:
 Until that variable is set, `/api/nova-poshta/cities` and `/api/nova-poshta/warehouses`
 return a clear "not configured yet" error instead of crashing, so the rest of
 checkout still works — the city/branch fields just won't return results.
-- **Auth on the admin routes.** Right now anyone with the URL can POST/PUT/
-  DELETE products or brands. Add an auth check (a simple shared admin token
-  is enough to start) before deploying this anywhere public.
+
+## Telegram order notifications (optional, two-minute setup)
+
+When both variables below are set, you get a Telegram message the instant
+someone places an order — item, total, name, phone, city, branch. If either
+is missing, orders just save normally with no message — nothing breaks.
+
+1. In Telegram, message **@BotFather** → send `/newbot` → follow the
+   prompts (pick any name and username) → it gives you a **token** that
+   looks like `123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`.
+2. Find your new bot in Telegram (search the username you gave it) and send
+   it any message, e.g. "Привіт" — this is required once, so Telegram knows
+   where to deliver messages later.
+3. On Render: **Environment** → add `TELEGRAM_BOT_TOKEN` with that token →
+   save (redeploys automatically).
+4. Once redeployed, open the admin panel on the site (⚙ → log in), stay on
+   the **Товари** tab, and find **"Знайти Telegram chat ID"** near the top —
+   click it, then **"Перевірити"**. It shows your chat id right there (no
+   need to open any URL by hand or add custom headers).
+5. Back on Render: add a second variable, `TELEGRAM_CHAT_ID`, with that
+   number → save.
+
+From then on, every new order sends you a Telegram message automatically.
