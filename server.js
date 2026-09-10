@@ -100,6 +100,39 @@ app.get("/api/admin/telegram-chat-id", requireAdmin, async (req, res) => {
   } catch (e) { res.status(502).json({ error: "Could not reach Telegram" }); }
 });
 
+// Debug helper: shows the raw first few warehouse records straight from
+// Nova Poshta for a city, so you (or I) can double-check field names/values
+// if something like the branch/postomat split ever looks wrong again —
+// open with ?city=Київ in the browser after logging into the admin panel
+// (it needs the x-admin-key header, so use a REST client or ask me to check
+// it with you rather than pasting the URL directly into the address bar).
+app.get("/api/admin/np-debug", requireAdmin, async (req, res) => {
+  if (!NOVA_POSHTA_KEY) return res.status(503).json({ error: "NOVA_POSHTA_KEY is not set yet" });
+  const cityName = req.query.city || "Київ";
+  try {
+    const cityRes = await fetch(NOVA_POSHTA_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getCities", methodProperties: { FindByString: cityName, Limit: "1" } }),
+    });
+    const cityData = await cityRes.json();
+    const cityRef = cityData.data?.[0]?.Ref;
+    if (!cityRef) return res.json({ error: "city not found", cityName });
+
+    const whRes = await fetch(NOVA_POSHTA_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses", methodProperties: { CityRef: cityRef, Limit: "5000" } }),
+    });
+    const whData = await whRes.json();
+    const total = whData.data?.length || 0;
+    const sample = (whData.data || []).slice(0, 3).map((w) => ({
+      Description: w.Description, CategoryOfWarehouse: w.CategoryOfWarehouse, TypeOfWarehouse: w.TypeOfWarehouse,
+    }));
+    const categoryCounts = {};
+    (whData.data || []).forEach((w) => { categoryCounts[w.CategoryOfWarehouse || "undefined"] = (categoryCounts[w.CategoryOfWarehouse || "undefined"] || 0) + 1; });
+    res.json({ cityName, total, categoryCounts, sample });
+  } catch (e) { res.status(502).json({ error: "Could not reach Nova Poshta" }); }
+});
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
@@ -333,7 +366,7 @@ app.post("/api/nova-poshta/warehouses", async (req, res) => {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses",
-        methodProperties: { CityRef: cityRef, Limit: "300" },
+        methodProperties: { CityRef: cityRef, Limit: "5000" },
       }),
     });
     const data = await npRes.json();
