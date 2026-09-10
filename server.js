@@ -118,18 +118,26 @@ app.get("/api/admin/np-debug", requireAdmin, async (req, res) => {
     const cityRef = cityData.data?.[0]?.Ref;
     if (!cityRef) return res.json({ error: "city not found", cityName });
 
-    const whRes = await fetch(NOVA_POSHTA_URL, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses", methodProperties: { CityRef: cityRef, Limit: "5000" } }),
-    });
-    const whData = await whRes.json();
-    const total = whData.data?.length || 0;
-    const sample = (whData.data || []).slice(0, 3).map((w) => ({
+    const PAGE_SIZE = 300;
+    let page = 1, allWh = [], pagesFetched = 0;
+    while (page <= 15) {
+      const whRes = await fetch(NOVA_POSHTA_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses", methodProperties: { CityRef: cityRef, Limit: String(PAGE_SIZE), Page: String(page) } }),
+      });
+      const whData = await whRes.json();
+      pagesFetched++;
+      allWh = allWh.concat(whData.data || []);
+      if ((whData.data || []).length < PAGE_SIZE) break;
+      page++;
+    }
+    const total = allWh.length;
+    const sample = allWh.slice(0, 3).map((w) => ({
       Description: w.Description, CategoryOfWarehouse: w.CategoryOfWarehouse, TypeOfWarehouse: w.TypeOfWarehouse,
     }));
     const categoryCounts = {};
-    (whData.data || []).forEach((w) => { categoryCounts[w.CategoryOfWarehouse || "undefined"] = (categoryCounts[w.CategoryOfWarehouse || "undefined"] || 0) + 1; });
-    res.json({ cityName, total, categoryCounts, sample });
+    allWh.forEach((w) => { categoryCounts[w.CategoryOfWarehouse || "undefined"] = (categoryCounts[w.CategoryOfWarehouse || "undefined"] || 0) + 1; });
+    res.json({ cityName, total, pagesFetched, categoryCounts, sample });
   } catch (e) { res.status(502).json({ error: "Could not reach Nova Poshta" }); }
 });
 
@@ -362,16 +370,28 @@ app.post("/api/nova-poshta/warehouses", async (req, res) => {
   const { cityRef } = req.body;
   if (!cityRef) return res.status(400).json({ error: "cityRef is required" });
   try {
-    const npRes = await fetch(NOVA_POSHTA_URL, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses",
-        methodProperties: { CityRef: cityRef, Limit: "5000" },
-      }),
-    });
-    const data = await npRes.json();
-    if (!data.success) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
-    res.json(data.data.map((w) => ({
+    // Nova Poshta caps how many warehouses it returns per request (observed:
+    // it silently returns ~300 regardless of the Limit we ask for) — so for
+    // a big city we have to page through results with the Page parameter
+    // until a page comes back with fewer than PAGE_SIZE entries.
+    const PAGE_SIZE = 300;
+    let page = 1;
+    let all = [];
+    while (page <= 15) { // hard stop — 15 × 300 = 4500, comfortably above any real city
+      const npRes = await fetch(NOVA_POSHTA_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getWarehouses",
+          methodProperties: { CityRef: cityRef, Limit: String(PAGE_SIZE), Page: String(page) },
+        }),
+      });
+      const data = await npRes.json();
+      if (!data.success) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
+      all = all.concat(data.data);
+      if (data.data.length < PAGE_SIZE) break; // last page
+      page++;
+    }
+    res.json(all.map((w) => ({
       ref: w.Ref, description: w.Description, number: w.Number,
       // Nova Poshta's API marks each point with CategoryOfWarehouse ("Postomat"
       // vs everything else = a staffed branch). Older/edge responses sometimes
