@@ -56,9 +56,25 @@ const SEED_BRANDS = [
   { id: "b4", name: "Verte & Fils", description: "Квіткові та цитрусові акорди, зіткані з ранкового світла." },
 ];
 
+const SEED_REVIEWS = [
+  { id: "r1", productId: "p1", author: "Олена", rating: 5, text: "Саме той аромат, що тримається на одязі до вечора. Дуже тепла деревна база.", createdAt: "2026-06-02T10:00:00.000Z", approved: true },
+  { id: "r2", productId: "p1", author: "Максим", rating: 4, text: "Гарний, але хотілось би трохи більше стійкості взимку.", createdAt: "2026-07-14T10:00:00.000Z", approved: true },
+  { id: "r3", productId: "p5", author: "Ірина", rating: 5, text: "Чоловік у захваті, купуємо вже другий флакон.", createdAt: "2026-05-20T10:00:00.000Z", approved: true },
+];
+
+const SEED_COLLECTIONS = [
+  { id: "c1", name: "Подарунок для нього", description: "Впевнені чоловічі аромати для особливого випадку.", productIds: ["p2", "p5", "p9", "p10"] },
+  { id: "c2", name: "Перше знайомство з архівом", description: "З чого почати, якщо ви новачок у ніші.", productIds: ["p1", "p7", "p8"] },
+];
+
 export async function getDb() {
-  const db = await JSONFilePreset("db.json", { products: SEED_PRODUCTS, brands: SEED_BRANDS, orders: [] });
-  // backfill for anyone re-running against an older db.json that predates "brands"
+  const db = await JSONFilePreset("db.json", {
+    products: SEED_PRODUCTS, brands: SEED_BRANDS, orders: [],
+    reviews: SEED_REVIEWS, collections: SEED_COLLECTIONS,
+  });
+  // backfill for anyone re-running against an older db.json from before these existed
   if (!db.data.brands) { db.data.brands = SEED_BRANDS; await db.write(); }
+  if (!db.data.reviews) { db.data.reviews = SEED_REVIEWS; await db.write(); }
+  if (!db.data.collections) { db.data.collections = SEED_COLLECTIONS; await db.write(); }
   return db;
 }
