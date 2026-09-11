@@ -97,9 +97,17 @@ app.get("/api/admin/telegram-chat-id", requireAdmin, async (req, res) => {
   try {
     const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`);
     const data = await r.json();
-    const last = data.result?.[data.result.length - 1];
-    const chatId = last?.message?.chat?.id ?? null;
-    res.json({ chatId, messagesSeen: data.result?.length || 0 });
+    // Collect every distinct chat seen — a personal message and a channel
+    // post use different update shapes (`message` vs `channel_post`), and
+    // if you've tested both, you want to see all of them, not just the
+    // most recent one.
+    const seen = new Map();
+    (data.result || []).forEach((u) => {
+      const chat = u.message?.chat || u.channel_post?.chat;
+      if (chat) seen.set(chat.id, { chatId: chat.id, type: chat.type, title: chat.title || chat.username || chat.first_name || "" });
+    });
+    const chats = [...seen.values()];
+    res.json({ chats, chatId: chats[chats.length - 1]?.chatId ?? null, messagesSeen: data.result?.length || 0 });
   } catch (e) { res.status(502).json({ error: "Could not reach Telegram" }); }
 });
 
