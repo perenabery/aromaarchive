@@ -53,7 +53,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "5mb" })); // generous limit: product photos are sent as base64
+app.use(express.json({ limit: "12mb" })); // generous limit: product/hero photos are sent as base64 (~33% bigger than the original file)
 app.use(morgan("dev"));
 
 const db = await getDb();
