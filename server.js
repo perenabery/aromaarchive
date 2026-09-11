@@ -1,8 +1,7 @@
 // REST API for the Архів Ароматів storefront — now multi-brand, with a
 // simple shared admin key protecting anything that changes data.
 //
-// Storage: a JSON file on disk (via lowdb) — swap the db.js adapter for
-// Postgres/MySQL when you're ready to go beyond a prototype.
+// Storage: MongoDB Atlas (see db.js) — survives redeploys, unlike a local file.
 //
 // Endpoints:
 //   GET    /api/products          list all products                    (public)
@@ -57,6 +56,38 @@ app.use(express.json({ limit: "12mb" })); // generous limit: product/hero photos
 app.use(morgan("dev"));
 
 const db = await getDb();
+
+// ---------------------------------------------------------------------------
+// Basic spam protection — no external service/account needed:
+//   1) Rate limiting: caps how many reviews/orders one IP can submit in a
+//      given window. In-memory, so it resets on redeploy — fine at this
+//      scale, and simpler than adding Redis for a single-server prototype.
+//   2) Honeypot: an invisible form field real visitors never fill in.
+//      Bots that auto-fill every field trip it; the request is rejected
+//      without revealing why (so the bot doesn't learn to skip that field).
+// ---------------------------------------------------------------------------
+const rateLimitHits = new Map(); // key -> array of timestamps (ms)
+
+function isRateLimited(key, max, windowMs) {
+  const now = Date.now();
+  const hits = (rateLimitHits.get(key) || []).filter((t) => now - t < windowMs);
+  hits.push(now);
+  rateLimitHits.set(key, hits);
+  return hits.length > max;
+}
+
+function clientIp(req) {
+  // Render sits behind a proxy, so the real client IP is in this header.
+  const fwd = req.headers["x-forwarded-for"];
+  return (fwd ? fwd.split(",")[0].trim() : req.socket.remoteAddress) || "unknown";
+}
+
+function requireNotBot(req, res) {
+  // "website" is the honeypot field name the frontend renders (hidden via
+  // CSS, off-tab-order) — a human never fills it, a naive bot often does.
+  if (req.body.website) { res.status(400).json({ error: "Request rejected" }); return false; }
+  return true;
+}
 
 // Fire-and-forget — never awaited by the order route, so a slow or failing
 // Telegram call never delays the customer's checkout or breaks the order.
@@ -253,6 +284,10 @@ app.get("/api/reviews", (req, res) => {
 });
 
 app.post("/api/reviews", async (req, res) => {
+  if (!requireNotBot(req, res)) return;
+  if (isRateLimited(`review:${clientIp(req)}`, 5, 15 * 60 * 1000)) {
+    return res.status(429).json({ error: "Забагато відгуків за короткий час. Спробуйте пізніше." });
+  }
   const { productId, author, rating, text } = req.body;
   if (!productId || !author || !rating) {
     return res.status(400).json({ error: "productId, author and rating are required" });
@@ -323,6 +358,10 @@ app.delete("/api/collections/:id", requireAdmin, async (req, res) => {
 // Orders
 // ---------------------------------------------------------------------------
 app.post("/api/orders", async (req, res) => {
+  if (!requireNotBot(req, res)) return;
+  if (isRateLimited(`order:${clientIp(req)}`, 8, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Забагато замовлень за короткий час. Спробуйте пізніше або напишіть нам напряму." });
+  }
   const { items, customer } = req.body;
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "items are required" });
