@@ -62,8 +62,9 @@ async function notifyTelegram(order) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   const itemsText = order.items.map((i) => `• ${i.qty} × ${i.name} (${i.volume}) — ${i.price} ₴`).join("\n");
   const c = order.customer;
+  const paymentLabel = c?.paymentMethod === "cod" ? "Накладений платіж" : c?.paymentMethod || "Не вказано";
   const customerText = c
-    ? `${c.name || "—"}\n${c.phone || "—"}${c.city ? `\n${c.city}${c.warehouse ? " — " + c.warehouse : ""}` : ""}`
+    ? `${c.name || "—"}\n${c.phone || "—"}${c.city ? `\n${c.city}${c.warehouse ? " — " + c.warehouse : ""}` : ""}\n💳 ${paymentLabel}`
     : "Без даних клієнта";
   const text = `🛍 Нове замовлення на ${order.total} ₴\n\n${itemsText}\n\n👤 ${customerText}`;
   try {
