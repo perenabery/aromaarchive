@@ -67,14 +67,17 @@ const SEED_COLLECTIONS = [
   { id: "c2", name: "Перше знайомство з архівом", description: "З чого почати, якщо ви новачок у ніші.", productIds: ["p1", "p7", "p8"] },
 ];
 
+const SEED_SETTINGS = { heroImage: null, heroVideo: null, heroZoom: 100, heroPosX: 50, heroPosY: 50 };
+
 export async function getDb() {
   const db = await JSONFilePreset("db.json", {
     products: SEED_PRODUCTS, brands: SEED_BRANDS, orders: [],
-    reviews: SEED_REVIEWS, collections: SEED_COLLECTIONS,
+    reviews: SEED_REVIEWS, collections: SEED_COLLECTIONS, settings: SEED_SETTINGS,
   });
   // backfill for anyone re-running against an older db.json from before these existed
   if (!db.data.brands) { db.data.brands = SEED_BRANDS; await db.write(); }
   if (!db.data.reviews) { db.data.reviews = SEED_REVIEWS; await db.write(); }
   if (!db.data.collections) { db.data.collections = SEED_COLLECTIONS; await db.write(); }
+  if (!db.data.settings) { db.data.settings = SEED_SETTINGS; await db.write(); }
   return db;
 }
