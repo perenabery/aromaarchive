@@ -19,6 +19,7 @@
 //   GET    /api/admin/telegram-chat-id   find your chat id after messaging the bot  (admin)
 //   POST   /api/nova-poshta/cities       search cities by name                (public, proxies Nova Poshta)
 //   POST   /api/nova-poshta/warehouses   list branches for a city              (public, proxies Nova Poshta)
+//   POST   /api/nova-poshta/calculate-price   real delivery cost, sender = Kyiv   (public, proxies Nova Poshta)
 //   GET    /api/settings          hero image/video + crop (shared, not per-browser)  (public)
 //   PUT    /api/settings          update those settings                        (admin)
 
@@ -216,7 +217,7 @@ app.post("/api/products", requireAdmin, async (req, res) => {
     imageZoom: imageZoom ?? 100,
     imagePosX: imagePosX ?? 50,
     imagePosY: imagePosY ?? 50,
-    variants: variants.map((v) => ({ id: v.id || nanoid(), volume: v.volume, price: Number(v.price), salePrice: v.salePrice ? Number(v.salePrice) : null })),
+    variants: variants.map((v) => ({ id: v.id || nanoid(), volume: v.volume, price: Number(v.price), salePrice: v.salePrice ? Number(v.salePrice) : null, weightGrams: v.weightGrams ? Number(v.weightGrams) : 300 })),
   };
   db.data.products.unshift(product);
   await db.write();
@@ -475,6 +476,52 @@ app.post("/api/nova-poshta/warehouses", async (req, res) => {
     })));
   } catch (e) {
     res.status(502).json({ error: "Could not reach Nova Poshta" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Delivery cost — sender is always Kyiv (that's where stock physically is).
+// Looked up once and cached, since Kyiv's CityRef never changes.
+// ---------------------------------------------------------------------------
+let kyivCityRefCache = null;
+
+async function getKyivCityRef() {
+  if (kyivCityRefCache) return kyivCityRefCache;
+  const res = await fetch(NOVA_POSHTA_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: NOVA_POSHTA_KEY, modelName: "Address", calledMethod: "getCities", methodProperties: { FindByString: "Київ", Limit: "5" } }),
+  });
+  const data = await res.json();
+  if (!data.success || !data.data?.length) throw new Error("Could not resolve Kyiv's city reference");
+  // Prefer an exact "Київ" match over any same-named village/suburb that might also come back.
+  const exact = data.data.find((c) => c.Description === "Київ") || data.data[0];
+  kyivCityRefCache = exact.Ref;
+  return kyivCityRefCache;
+}
+
+app.post("/api/nova-poshta/calculate-price", async (req, res) => {
+  if (!NOVA_POSHTA_KEY) return res.status(503).json({ error: "Nova Poshta API key is not configured on the server yet" });
+  const { cityRecipientRef, weightKg, declaredValue } = req.body;
+  if (!cityRecipientRef) return res.status(400).json({ error: "cityRecipientRef is required" });
+  try {
+    const citySenderRef = await getKyivCityRef();
+    const npRes = await fetch(NOVA_POSHTA_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: NOVA_POSHTA_KEY, modelName: "InternetDocument", calledMethod: "getDocumentPrice",
+        methodProperties: {
+          CitySender: citySenderRef, CityRecipient: cityRecipientRef,
+          Weight: String(weightKg || 0.5), ServiceType: "WarehouseWarehouse",
+          Cost: String(declaredValue || 500), CargoType: "Parcel", SeatsAmount: "1",
+        },
+      }),
+    });
+    const data = await npRes.json();
+    if (!data.success) return res.status(502).json({ error: "Nova Poshta rejected the request", details: data.errors });
+    const price = data.data?.[0]?.Cost;
+    res.json({ price: price != null ? Number(price) : null });
+  } catch (e) {
+    res.status(502).json({ error: "Could not calculate delivery price" });
   }
 });
 
