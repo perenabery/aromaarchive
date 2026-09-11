@@ -20,6 +20,8 @@
 //   GET    /api/admin/telegram-chat-id   find your chat id after messaging the bot  (admin)
 //   POST   /api/nova-poshta/cities       search cities by name                (public, proxies Nova Poshta)
 //   POST   /api/nova-poshta/warehouses   list branches for a city              (public, proxies Nova Poshta)
+//   GET    /api/settings          hero image/video + crop (shared, not per-browser)  (public)
+//   PUT    /api/settings          update those settings                        (admin)
 
 import express from "express";
 import cors from "cors";
@@ -268,6 +270,20 @@ app.delete("/api/reviews/:id", requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 app.get("/api/collections", (req, res) => {
   res.json(db.data.collections || []);
+});
+
+// ---------------------------------------------------------------------------
+// Site settings — hero image/video + crop, shared by everyone who loads the
+// site (unlike browser-local storage, this is the same for every device).
+// ---------------------------------------------------------------------------
+app.get("/api/settings", (req, res) => {
+  res.json(db.data.settings);
+});
+
+app.put("/api/settings", requireAdmin, async (req, res) => {
+  db.data.settings = { ...db.data.settings, ...req.body };
+  await db.write();
+  res.json(db.data.settings);
 });
 
 app.post("/api/collections", requireAdmin, async (req, res) => {
