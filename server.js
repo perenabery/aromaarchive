@@ -27,7 +27,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import { nanoid } from "nanoid";
-import { getDb } from "./db.js";
+import { getDb, getDbDebugInfo } from "./db.js";
 
 const PORT = process.env.PORT || 4000;
 // Set this in Render → your service → Environment → add ADMIN_KEY with your
@@ -149,6 +149,17 @@ app.get("/api/admin/telegram-chat-id", requireAdmin, async (req, res) => {
 // open with ?city=Київ in the browser after logging into the admin panel
 // (it needs the x-admin-key header, so use a REST client or ask me to check
 // it with you rather than pasting the URL directly into the address bar).
+// Debug helper: reports exactly what the running server sees in MongoDB —
+// which database/collection, whether the singleton document exists, and a
+// few counts — so you don't have to trust the Atlas UI (which can lag or
+// point you at the wrong cluster/project) when something looks off.
+app.get("/api/admin/db-debug", requireAdmin, async (req, res) => {
+  try {
+    const info = await getDbDebugInfo();
+    res.json(info);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 app.get("/api/admin/np-debug", requireAdmin, async (req, res) => {
   if (!NOVA_POSHTA_KEY) return res.status(503).json({ error: "NOVA_POSHTA_KEY is not set yet" });
   const cityName = req.query.city || "Київ";
