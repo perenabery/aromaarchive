@@ -1,4 +1,4 @@
-import { JSONFilePreset } from "lowdb/node";
+import { MongoClient } from "mongodb";
 
 // Product shape mirrors the frontend (aroma-archive.jsx) exactly, plus a
 // "brand" field now that the store is multi-brand.
@@ -69,15 +69,79 @@ const SEED_COLLECTIONS = [
 
 const SEED_SETTINGS = { heroImage: null, heroVideo: null, heroZoom: 100, heroPosX: 50, heroPosY: 50 };
 
+// Storage: a single document in MongoDB Atlas holding the whole app's data
+// (products, brands, orders, reviews, collections, settings) — same shape
+// as the old db.json file, just persisted somewhere that survives a
+// redeploy instead of Render's ephemeral disk. Every route elsewhere in
+// this backend still just reads/writes `db.data.<thing>` and calls
+// `db.write()`, exactly like before — only this function changed.
+//
+// Set MONGODB_URI in Render → your service → Environment, with the
+// connection string from MongoDB Atlas (see README for the full setup).
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = "aroma_archive";
+const COLLECTION_NAME = "app_data";
+const DOC_ID = "singleton";
+
+let mongoClient;
+let collection;
+
+async function getCollection() {
+  if (collection) return collection;
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI is not set — add it in Render → Environment (see README for the MongoDB Atlas setup steps).");
+  }
+  mongoClient = new MongoClient(MONGODB_URI);
+  await mongoClient.connect();
+  collection = mongoClient.db(DB_NAME).collection(COLLECTION_NAME);
+  return collection;
+}
+
 export async function getDb() {
-  const db = await JSONFilePreset("db.json", {
-    products: SEED_PRODUCTS, brands: SEED_BRANDS, orders: [],
-    reviews: SEED_REVIEWS, collections: SEED_COLLECTIONS, settings: SEED_SETTINGS,
-  });
-  // backfill for anyone re-running against an older db.json from before these existed
-  if (!db.data.brands) { db.data.brands = SEED_BRANDS; await db.write(); }
-  if (!db.data.reviews) { db.data.reviews = SEED_REVIEWS; await db.write(); }
-  if (!db.data.collections) { db.data.collections = SEED_COLLECTIONS; await db.write(); }
-  if (!db.data.settings) { db.data.settings = SEED_SETTINGS; await db.write(); }
-  return db;
+  const col = await getCollection();
+  let doc = await col.findOne({ _id: DOC_ID });
+
+  if (!doc) {
+    doc = {
+      _id: DOC_ID,
+      products: SEED_PRODUCTS, brands: SEED_BRANDS, orders: [],
+      reviews: SEED_REVIEWS, collections: SEED_COLLECTIONS, settings: SEED_SETTINGS,
+    };
+    await col.insertOne(doc);
+  }
+
+  // backfill for anyone whose document predates these fields
+  let needsWrite = false;
+  if (!doc.brands) { doc.brands = SEED_BRANDS; needsWrite = true; }
+  if (!doc.reviews) { doc.reviews = SEED_REVIEWS; needsWrite = true; }
+  if (!doc.collections) { doc.collections = SEED_COLLECTIONS; needsWrite = true; }
+  if (!doc.settings) { doc.settings = SEED_SETTINGS; needsWrite = true; }
+
+  const dbLike = {
+    data: doc,
+    async write() {
+      const { _id, ...rest } = dbLike.data;
+      await col.updateOne({ _id: DOC_ID }, { $set: rest }, { upsert: true });
+    },
+  };
+
+  if (needsWrite) await dbLike.write();
+  return dbLike;
+}
+
+// Reports exactly where this server is actually reading/writing, and what
+// it finds there — bypasses any need to trust the Atlas web UI.
+export async function getDbDebugInfo() {
+  const col = await getCollection();
+  const doc = await col.findOne({ _id: DOC_ID });
+  return {
+    databaseName: DB_NAME,
+    collectionName: COLLECTION_NAME,
+    documentExists: Boolean(doc),
+    productsCount: doc?.products?.length ?? 0,
+    firstProductName: doc?.products?.[0]?.name ?? null,
+    lastProductName: doc?.products?.[doc?.products?.length - 1]?.name ?? null,
+    ordersCount: doc?.orders?.length ?? 0,
+    heroImageSet: Boolean(doc?.settings?.heroImage),
+  };
 }
