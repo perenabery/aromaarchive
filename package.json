@@ -1,7 +1,7 @@
 {
   "name": "aroma-archive-backend",
   "version": "1.0.0",
-  "description": "Minimal Express + JSON-file API prototype for the Archив ароматів storefront",
+  "description": "Minimal Express + MongoDB API prototype for the Архів Ароматів storefront",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -11,7 +11,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "lowdb": "^7.0.1",
+    "mongodb": "^6.10.0",
     "morgan": "^1.10.0",
     "nanoid": "^5.0.7"
   }
